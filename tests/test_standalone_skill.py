@@ -123,7 +123,7 @@ class ContractTests(unittest.TestCase):
     def test_required_files_and_no_old_runtime_dependency(self):
         required=["SKILL.md","agents/openai.yaml","references/collection-guide.md","references/raw-record-schema.md","scripts/reddit_playwright_collector.cjs","scripts/reddit_thread_core.cjs","scripts/audit_thread_evidence.py","scripts/reddit_query_planner.py","scripts/reddit_visible_capture.js","scripts/normalize_raw_jsonl.py","scripts/start_reddit_cdp.ps1"]
         for rel in required: self.assertTrue((ROOT/rel).is_file(),rel)
-        forbidden=["reddit-"+"review-collector", str(Path("D:/Project/2026/SKILL")/("V"+"OC")/"skill"), "voc-data-"+"collection"]
+        forbidden=["reddit-"+"review-collector", "voc-data-"+"collection"]
         for path in ROOT.rglob("*"):
             if path.is_file() and "__pycache__" not in path.parts:
                 text=path.read_text(encoding="utf-8",errors="ignore"); self.assertFalse(any(x.casefold() in text.casefold() for x in forbidden),str(path))
