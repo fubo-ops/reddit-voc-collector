@@ -1,4 +1,5 @@
 import json
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -18,6 +19,7 @@ class RepositoryDistributionTests(unittest.TestCase):
             "SKILL.md",
             "LICENSE",
             "agents/openai.yaml",
+            "scripts/quick_validate.py",
         ]
         self.assertEqual([], [name for name in required if not (ROOT / name).is_file()])
 
@@ -27,26 +29,28 @@ class RepositoryDistributionTests(unittest.TestCase):
         self.assertIn("openpyxl", requirements)
         self.assertIn("playwright", package.get("dependencies", {}))
 
-    def test_repository_excludes_generated_and_sensitive_artifacts(self):
-        forbidden_dirs = {"dist", "outputs", "node_modules", "__pycache__", ".pytest_cache"}
-        forbidden_suffixes = {".xlsx", ".jsonl", ".pyc", ".log", ".tmp"}
-        bad = []
-        for path in ROOT.rglob("*"):
-            relative = path.relative_to(ROOT)
-            if any(part in forbidden_dirs for part in relative.parts):
-                bad.append(str(relative))
-            elif path.is_file() and path.suffix.lower() in forbidden_suffixes:
-                bad.append(str(relative))
+    def test_git_upload_excludes_generated_and_sensitive_artifacts(self):
+        run = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+            cwd=ROOT,
+            capture_output=True,
+        )
+        self.assertEqual(0, run.returncode, run.stderr.decode(errors="replace"))
+        names = [name for name in run.stdout.decode().split("\0") if name]
+        forbidden_parts = {"dist", "outputs", "node_modules", "__pycache__", ".pytest_cache"}
+        forbidden_suffixes = {".xlsx", ".jsonl", ".pyc", ".log", ".tmp", ".har"}
+        bad = [
+            name for name in names
+            if any(part in forbidden_parts for part in Path(name).parts)
+            or Path(name).suffix.lower() in forbidden_suffixes
+            or Path(name).name in {".env", "SingletonCookie", "SingletonLock", "SingletonSocket"}
+        ]
         self.assertEqual([], bad)
 
     def test_ci_covers_python_node_and_skill_validation(self):
         workflow = (ROOT / ".github/workflows/test.yml").read_text(encoding="utf-8")
-        self.assertIn("windows-latest", workflow)
-        self.assertIn("macos-latest", workflow)
-        self.assertIn("ubuntu-latest", workflow)
-        self.assertIn("python -m unittest", workflow)
-        self.assertIn("npm test", workflow)
-        self.assertIn("quick_validate.py", workflow)
+        for value in ("windows-latest", "macos-latest", "ubuntu-latest", "python -m unittest", "npm test", "quick_validate.py"):
+            self.assertIn(value, workflow)
 
 
 if __name__ == "__main__":
