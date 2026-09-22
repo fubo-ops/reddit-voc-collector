@@ -10,8 +10,19 @@ $ErrorActionPreference = "Stop"
 
 function Test-CdpPort {
     param([int]$LocalPort)
-    $listeners = @(Get-NetTCPConnection -LocalPort $LocalPort -State Listen -ErrorAction SilentlyContinue)
-    return $listeners.Count -gt 0
+    $client = [System.Net.Sockets.TcpClient]::new()
+    try {
+        $pending = $client.BeginConnect("127.0.0.1", $LocalPort, $null, $null)
+        if (-not $pending.AsyncWaitHandle.WaitOne(500)) {
+            return $false
+        }
+        $client.EndConnect($pending)
+        return $true
+    } catch {
+        return $false
+    } finally {
+        $client.Dispose()
+    }
 }
 
 function Write-JsonResult {
