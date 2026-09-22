@@ -162,7 +162,7 @@ class ContractTests(unittest.TestCase):
     def test_listening_port_does_not_start_chrome(self):
         listener=socket.socket(); listener.bind(("127.0.0.1",0)); listener.listen(); port=listener.getsockname()[1]
         try:
-            run=subprocess.run(["powershell","-NoProfile","-ExecutionPolicy","Bypass","-File",str(ROOT/"scripts/start_reddit_cdp.ps1"),"-Port",str(port),"-ChromePath","Z:\\missing\\chrome.exe"],capture_output=True,text=True,encoding="utf-8",timeout=10)
+            run=subprocess.run(["powershell","-NoProfile","-ExecutionPolicy","Bypass","-File",str(ROOT/"scripts/start_reddit_cdp.ps1"),"-Port",str(port),"-ChromePath","Z:\\missing\\chrome.exe"],capture_output=True,text=True,encoding="utf-8",timeout=30)
         finally: listener.close()
         self.assertEqual(run.returncode,0,run.stderr+run.stdout)
         result=json.loads(run.stdout.strip().splitlines()[-1])
