@@ -1,0 +1,17 @@
+{
+  "name": "reddit-voc-collector",
+  "version": "1.0.0-rc.1",
+  "private": true,
+  "description": "Public Reddit VOC comment collector and Codex Skill",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test tests/test_conversation_discovery.cjs tests/test_extension_bridge.cjs",
+    "check": "node --check scripts/reddit_playwright_collector.cjs && node --check scripts/reddit_thread_core.cjs && node --check scripts/reddit_visible_capture.js && node --check extension/service_worker.js && node --check extension/auto_content.js"
+  },
+  "dependencies": {
+    "playwright": ">=1.55.0 <2"
+  }
+}

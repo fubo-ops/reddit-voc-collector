@@ -1,0 +1,4 @@
+interface:
+  display_name: "Reddit VOC Collector"
+  short_description: "通过用户选定Chrome标签页采集Reddit VOC"
+  default_prompt: "Use $reddit-voc-collector with my explicitly @mentioned Chrome Reddit tab in selected-chrome-tab mode. Preflight visible DOM first, never inspect other tabs or CDP, and merge only independently audited PASS comments."

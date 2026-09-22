@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Reddit VOC Local Bridge",
+  "version": "1.0.0.1",
+  "description": "Automatically captures visible public comment trees only in collector-owned Reddit tabs marked by a short-lived local RUN_ID.",
+  "permissions": [],
+  "host_permissions": [
+    "https://www.reddit.com/*",
+    "http://127.0.0.1:43127/*"
+  ],
+  "background": {
+    "service_worker": "service_worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.reddit.com/*"
+      ],
+      "js": [
+        "session_core.js",
+        "capture_core.js",
+        "visible_capture.js",
+        "auto_content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Reddit VOC collector-owned-tab mode"
+  },
+  "version_name": "1.0.0-rc1",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAu91Uv5mXqNyoPYjHwJRzNXooaxaVPn/WKjURXWV3kvHoRfT5NO3yqLUTf4F1tri70h2NEcun6ekestdPb+tgUXXkT77n1ylQEvQrl0x1AcXlkEDs+W2OlM/jpKOky5dz5gtIcBsc1D9kWhqB8pZV2W0bW1p7Ku8Y3N31GT/Pv7VxB7UCtDa9+P4J46mtuK7rZqqYVu8O0EZIEPFEyC189veGRAouOvMnHwO8GweC2aReJ2cgIU/ZUEeUZAOpUJM9Jp/r2EkNzffhA1pWO5G0MJMV4CkLJAc67Oahfz97Fm7Rx+QFD0h7sKC2pE4uAdx7ncdUzUAjmP5Fus8zLhOYtwIDAQAB"
+}
