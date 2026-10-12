@@ -37,7 +37,7 @@ class CommentTests(unittest.TestCase):
         self.assertEqual([(r["comment_id"],r["depth"],r["parent_id"]) for r in rows], [("c1",0,"p1"),("c2",1,"c1")])
     def test_comment_fields_are_normalized(self):
         row=NORMALIZER.normalize_comment(self.sample(), collected_at="2026-02-02T00:00:00Z")
-        required={"schema_version","platform","asin","matched_asins","query","matched_keywords","subreddit","post_id","post_title","post_url","comment_id","parent_id","depth","author","body","score","created_at","comment_url","collected_at","relevance_tier","association_reason","evidence_terms","relevance_score","comment_relevance_score","discovery_round","query_family","source_query","community_source","comment_record_status","thread_audit_status","thread_evidence_path"}
+        required={"schema_version","platform","asin","matched_asins","query","matched_keywords","subreddit","post_id","post_title","post_url","comment_id","parent_id","depth","author","body","score","created_at","comment_url","collected_at","relevance_tier","association_reason","evidence_terms","relevance_score","comment_relevance_score","discovery_round","query_family","source_query","community_source","comment_record_status","thread_audit_status","thread_evidence_path","audit_status","semantic_relevance","comment_gate","quality_tier"}
         self.assertEqual(set(row),required); self.assertEqual(row["platform"],"reddit")
     def test_comment_id_and_url_dedupe_merges_asins(self):
         rows,stats=NORMALIZER.dedupe_comments([self.sample(),self.sample(asin="B087654321",matched_asins=["B087654321"],query="pet mat")])
@@ -133,12 +133,12 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(run.returncode,0,run.stderr)
         states=[x["status"] for x in json.loads(run.stdout)]
         self.assertEqual(states,["ready","login_required","network_blocked","ready","rate_limited","access_denied"])
-    def test_cdp_is_default_and_requires_endpoint(self):
+    def test_opencli_is_default_with_explicit_cdp_compatibility(self):
         script=f'''const c=require({json.dumps(str(ROOT / "scripts/reddit_playwright_collector.cjs"))}); console.log(JSON.stringify(c.args(["preflight"])))'''
         run=subprocess.run(["node","-e",script],capture_output=True,text=True,encoding="utf-8")
         self.assertEqual(run.returncode,0,run.stderr)
         parsed=json.loads(run.stdout)
-        self.assertEqual(parsed["sessionMode"],"cdp")
+        self.assertEqual(parsed["sessionMode"],"opencli")
         self.assertEqual(parsed["cdpUrl"],"http://127.0.0.1:9222")
 
     def test_closed_cdp_port_is_not_a_reddit_access_denial(self):

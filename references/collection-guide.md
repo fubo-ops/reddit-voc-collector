@@ -1,146 +1,83 @@
-# Collection guide
+# Collection guide — collector 2.1.0
 
-> Default Codex bridge: version 1.0.0-rc1 uses one collector-created Chrome tab marked by a short-lived URL-fragment RUN_ID. No popup, pairing-code entry, activeTab click, CDP or dedicated Profile is used. See [extension-bridge-design.md](extension-bridge-design.md).
+## Preparation and default workflow
 
-## Collector-owned-tab run
+The current transport is OpenCLI, not the old Reddit local bridge. Install the OpenCLI CLI/Chrome extension separately, connect it to normal Chrome, and log in manually if needed. `OPENCLI_ENTRY` may point to its installed `dist/src/main.js`. On Windows the collector discovers the usual global npm installation. Only owned page handles are inspected; no tab inventory or authentication/network capture is used.
 
-1. Start `python local_bridge/reddit_bridge_server.py --output-dir ABSOLUTE_SMOKE_DIR` and read `run_id` from the first stdout JSON line.
-2. Through Codex Computer Use, call `createBrowserTab("chrome", TARGET_URL + "#reddit-voc-run=" + RUN_ID, {sessionName:"🧪 Reddit VOC"})`. Keep the returned handle; do not list user tabs.
-3. Wait for `audit.json` and `checkpoint.json`. Navigate the same handle to later marked URLs only after the current post reaches a terminal audit state.
-4. Stop immediately on BLOCKED or bridge/extension failure. At the end, close only the retained tab handle and terminate only the recorded bridge PID.
-5. Never persist RUN_ID/session keys or merge PARTIAL/BLOCKED batches into Trusted Comments.
+Before browser collection:
+```powershell
+node scripts/reddit_playwright_collector.cjs doctor
+node scripts/reddit_playwright_collector.cjs preflight --asin ASIN --out-dir RUN_DIR
+node scripts/reddit_playwright_collector.cjs collect --asin ASIN --target-comments 500 --out-dir RUN_DIR
+```
+Commands are run from the Skill folder. `preflight` checks one Reddit home page, one product-derived search page and one observed related thread's visible comments; it exports no comments and closes its owned tab. `collect` repeats doctor and preflight before admitting any records. Amazon metadata preparation may navigate the same owned tab before Reddit preflight. Missing product data stops the run. Nonready or access failure does not trigger another transport, browser refresh or automatic retry.
 
-## Resume and force-re-audit PARTIAL threads
+## Product records and keywords
+
+New ASINs are read from Amazon US visible product DOM. Extract title, brand, leaf category and visible feature bullets; common names, attributes, contexts and problem terms may be supplied as observed metadata where the DOM does not expose separate fields. Product-derived rules never inherit another ASIN's seed list. Generic titles/ambiguous category names need better documented aliases rather than fabricated pain points.
+
+Accepted metadata JSON:
+```json
+{
+  "products": {
+    "B000VAC001": {
+      "asin": "B000VAC001", "title": "Example cordless vacuum cleaner",
+      "brand": "Example", "category": "Vacuum Cleaners",
+      "common_names": ["cordless vacuum", "vacuum cleaner"],
+      "functions": ["carpet cleaning"], "source_url": "https://www.amazon.com/dp/B000VAC001"
+    }
+  },
+  "seller_keywords": {},
+  "access": {"B000VAC001": {"sellersprite_website_status": "not_checked", "sellersprite_extension_status": "not_visible", "seller_missing_reason": "Amazon-only seeds"}}
+}
+```
+This is an illustrative metadata fixture, not live product evidence. `--metadata-json FILE` supports cached, source-preserving records and offline preparation. A CLI without supplied metadata reads Amazon first. Site login state, extension-panel visibility and Amazon login/access are separate facts. Recognized SellerSprite `[data-keyword]` data must be bound to the input ASIN; unrecognized UI or missing login is recorded as unavailable. `--sellersprite-url URL` optionally inspects the visible site in an owned page; it does not read a pre-existing user tab, credentials, cookies or extension storage.
+
+Round 1 uses observed Amazon/SellerSprite fields and neutral review/comparison query templates. Later queries are actual comment phrases with `evidence_comment_ids`, `source_terms`, `generation_source` and `semantic_link`. Competitor terms must be evidenced in supplied metadata or subsequently observed category comparisons; do not invent competitor names. Product relevance is independent for each comment; short acknowledgements and implicit-only replies may be conservatively excluded.
+
+## Serial tree traversal and stop rules
+
+Navigation waits 8–15 seconds; each expansion waits 1–3 seconds. One control is clicked per scan inside the current comment tree, scoped to its owner comment. No ads/recommendations/community links are expanded. Same-post continuations use owned child tabs, return to the parent frontier and close only owned children. Two stable scans with no new IDs or remaining entries end the visible frontier. Tree nodes and captured bodies are checkpointed per expansion, thread and query.
+
+识别当前评论树中的 more replies、more comments、view more replies、continue this thread、load more comments、show more 及中文控件。连续两轮无新增 comment_id 且无剩余展开入口才结束。作者为 `[deleted]` 但正文可见时保留；仅过滤删除/移除/空正文和机器人模板。
+
+`--max-posts-per-query 5 --max-expand-actions 100 --max-comments-per-post 500 --thread-timeout 600` bound work. Thresholds can be lowered for smoke. `--concurrency 1 --asin-workers 1 --max-retries 0` are enforced. CAPTCHA, login wall, network-security block, visible 403/429/access denial, tab identity change or comment load failure stops all later work. No refresh, proxy switch or access retry is attempted.
+
+## Modes and resume
+
+Strict is the default on a new checkpoint. Relevance requires user approval plus explicit `--quality-mode relevance`; only count reconciliation may be relaxed. Orphans/cycles/depth conflicts, unfinished controls and load/access failures remain excluded. Audit remains PARTIAL even when an independently valid row counts. Existing quality mode is retained on resume unless the flag is explicit.
 
 ```powershell
-node scripts\reddit_playwright_collector.cjs collect --asin B003ULL1NQ --target-comments 300 --retry-partial --force-reaudit-partial --session-mode selected-chrome-tab
+# Single ASIN and cached observed metadata
+node scripts/reddit_playwright_collector.cjs collect --asin ASIN --metadata-json PRODUCT_JSON --target-comments 500 --out-dir RUN_DIR
+# Multi-ASIN or TXT/CSV; target is globally unique comments
+node scripts/reddit_playwright_collector.cjs collect --asins ASIN1,ASIN2 --target-comments 500 --out-dir RUN_DIR
+node scripts/reddit_playwright_collector.cjs collect --asin-file ASIN_FILE --target-comments 500 --out-dir RUN_DIR
+# Explicit relaxed mode and PARTIAL re-audit, keeping old PASS
+node scripts/reddit_playwright_collector.cjs collect --asin ASIN --quality-mode relevance --retry-partial --force-reaudit-partial --target-comments 800 --out-dir EXISTING_RUN_DIR
 ```
+Do not use a fresh directory to resume. Completed keywords cannot suppress the explicit PARTIAL re-audit queue or later pending queries. Re-audited valid partials can upgrade to PASS with no extra count; unsafe partials are preserved only as candidates. `--historical-partial-limit NUMBER` caps newly admitted evidence-reuse rows in addition to the preserved baseline, not the total final quota; zero disables new partial reuse. New-run target defaults to 500, but resume preserves its previous target unless `--target-comments` is explicit. Target admission caps both accepted tiers; lowering a target below preserved counted data is an error, never truncation.
 
-In a Codex task this command defines the checkpoint contract; browser work uses the explicitly selected Chrome tab bridge. The PARTIAL queue runs before discovery, ignores completed keyword markers, saves after every thread/action, preserves existing PASS comments, and globally merges only newly audited PASS comments.
+## Maintained export, validation and delivery
 
-## 1. Offline preparation
-
-Requirements: Python 3.10+, Node.js, Google Chrome, and local `playwright`. Offline validation runs Python tests, JavaScript syntax checks, CLI help, and Skill quick validation without opening a browser.
-
-## 2. Codex selected Chrome tab (default)
-
-`selected-chrome-tab` is **Codex task only**. The user must @Chrome mention the exact, already-open Reddit tab. The mention supplies the browser and tab identity; bind it directly and do not call tab inventory APIs to discover alternatives.
-
-Preflight procedure:
-
-1. Verify the binding is an extension-backed Chrome tab explicitly selected by the user.
-2. Snapshot its tab ID/provider ID, URL and title; require an HTTPS Reddit host.
-3. Read visible DOM only and classify login, CAPTCHA, network block, 403/429 and access-denied text.
-4. Stop if the tab closes, its identity changes, or it navigates outside Reddit.
-5. Create temporary pages only through the same browser bridge, record their IDs as collector-owned, and close only those pages.
-
-This mode does not probe port 9222, does not run `start_reddit_cdp.ps1`, and does not expose itself as an independent Node CLI transport. It never reads cookies, passwords, tokens, Profile files or authentication storage.
-
-The bridge supports URL/title/DOM reads, navigation, locators, clicks, collector-owned temporary tabs, and read-only page evaluation. Its evaluation sandbox currently omits `fetch` and `AbortController`; selected mode therefore uses this visible-DOM frontier:
-
-1. Scan only the current post comment tree for `more replies`, `more comments`, `view more replies`, `continue this thread`, `load more comments`, `show more`, `查看更多回复`, `更多评论`, and `继续此讨论串`.
-2. Click one inline control, wait 1–3 seconds for DOM stability, scroll the comment area, recapture IDs/parents/depth, and save checkpoint. Never click advertisements, recommendations, community links, or unrelated posts.
-3. Open `continue this thread` only in a collector-created, marked temporary tab. Require the same original post ID, merge the subtree, then close only that temporary tab.
-4. Finish after 连续两轮 scans show no new `comment_id` and no eligible control. Resume skips keys already present in `expanded_control_keys` and starts from `incomplete_frontier`.
-5. Stop without refresh or retry on CAPTCHA, login wall, visible 403/429, network-security block, access denial, comment-load failure, action limit, comment limit, or timeout.
-
-Defaults: `--max-expand-actions 100 --max-comments-per-post 500 --expand-delay-min 1 --expand-delay-max 3 --thread-timeout 600`. Evidence records `capture_mode: visible_dom`, every control/action delta, current total, maximum depth, `collected_comment_ids`, and remaining frontier. It must not claim JSON `after`, `morechildren`, or `api/info` completeness.
-
-`PASS` requires a closed frontier, two stable rounds, no orphan parent, and a reconcilable visible platform count. Any unfinished control, failed load, orphan, or unreconciled count is `PARTIAL`; a visible access restriction is `BLOCKED`. Valid PASS records enter `Trusted_Comments`; stable PARTIAL records enter the clearly separated `Partial_Candidates`; BLOCKED records are excluded.
-
-The local Node entry point recognizes the boundary but cannot acquire a Codex tab handle:
-
+Collection automatically exports/validates/delivers after a ready preflight; use `--no-export` to defer that offline phase. Deferred export and read-only validation:
 ```powershell
-node scripts\reddit_playwright_collector.cjs preflight --session-mode selected-chrome-tab
+node scripts/reddit_playwright_collector.cjs export --out-dir RUN_DIR --delivery-dir "D:\Project\2026\SKILL\reddit评论采集"
+node scripts/reddit_playwright_collector.cjs validate --out-dir RUN_DIR
+python -X utf8 scripts/validate_opencli_run.py --out-dir RUN_DIR --read-only
 ```
+The maintained artifact-tool builder needs Codex bundled Node packages. `ARTIFACT_NODE_MODULES`, `ARTIFACT_NODE`, `REDDIT_PYTHON` or `--python` can identify equivalent external runtimes. There is no runtime dependency on the original VOC project or a temporary-directory script. Export failure is surfaced; no library fallback silently weakens validation.
 
-It returns `codex_bridge_required` without checking port 9222. Invoke `$reddit-voc-collector` in Codex with an @Chrome tab instead.
+Strict sheets: Trusted_Comments, Partial_Candidates, Conversation_Map, Query_Performance, Community_Map, Run_Summary. Relevance adds Comments first and Validated_Partial_Comments separately. Counted and candidate records never mix. The actual validator checks identity/body, eligibility, evidence ancestry, duplicate IDs/URLs, global/per-ASIN counts, tier sheets and projection, filters/freeze, absence of formulas, manifest/JSONL/audit consistency and delivery hashes. Failed/incomplete runs retain an internal workbook; only exit 0 authorizes validated delivery.
 
-## 3. Independent CLI CDP connection
+Each ASIN gets `ASIN_reddit评论_COUNT条_UTC_TIMESTAMP.xlsx`; historical filenames are never replaced. Internal files remain in RUN_DIR. Exclusive delivery copying verifies SHA256 and writes `delivery_excel_path` and `deliveries` to manifest. Repeating delivery of the identical already-present file is idempotent; differing content at that filename is an error.
 
-A normal Chrome process can be connected only when it was launched with remote debugging. Do not copy, export, or reuse the daily Chrome profile. If the currently running Chrome has no CDP endpoint, launch a separate visible profile:
+## Compatibility
 
-```powershell
-$chrome = "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
-$cdpProfile = Join-Path (Resolve-Path .) "outputs\reddit-comments\chrome-cdp-profile"
-Start-Process -FilePath $chrome -ArgumentList @(
-  "--remote-debugging-port=9222",
-  "--remote-debugging-address=127.0.0.1",
-  "--user-data-dir=$cdpProfile",
-  "--no-first-run",
-  "https://www.reddit.com/"
-)
-```
+The previous CDP and selected-tab/RC1 local-bridge workflows are opt-in compatibility interfaces, not the default and not auto-retries. Legacy extension identity/version stays RC1; OpenCLI uses its own extension. CDP's readiness/port/Profile behavior is never invoked by OpenCLI. Legacy bridge details: [extension-bridge-design.md](extension-bridge-design.md). Compatibility-only scripts `build_voc_workbook.py` and `finalize_collector_batch.py` do not define the current quality/export contract.
 
-Keep that window open. Complete any permitted login manually and confirm that a Reddit page and search results render normally. The collector connects to `http://127.0.0.1:9222`; it does not read or export credentials or cookies.
+Legacy selected-chrome-tab is **Codex task only**, requires explicit @Chrome selection and a supported bridge, and does not probe port 9222. Its visible-DOM frontier does not make that bridge an independent CLI transport. These boundaries do not change the collector-owned OpenCLI default.
 
-The checked-in one-command launcher performs the same operation, checks port 9222 first, and waits at most 15 seconds:
+## Offline acceptance
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\start_reddit_cdp.ps1
-```
-
-If the port already listens, it returns `ready` without launching another Chrome. If the dedicated profile is already owned by a process but its CDP port is unavailable, it reports that process and asks the user to handle only that dedicated window; it never uses `taskkill` or closes normal Chrome.
-
-## 4. CDP page-only preflight
-
-```powershell
-node scripts\reddit_playwright_collector.cjs preflight `
-  --session-mode cdp `
-  --cdp-url http://127.0.0.1:9222
-```
-
-Preflight requires an already-open Reddit tab. It checks visible DOM content on that page, opens a temporary Reddit search page, confirms at least one visible result, opens one result or `--preflight-post-url`, and confirms visible comments. It closes only its temporary tab. It does not collect records, use background HTTP status, close Chrome, refresh, or retry.
-
-Before connecting, the collector reads only the local Chrome metadata endpoint `http://127.0.0.1:9222/json/version`. If it is not listening, preflight runs the launcher once. This local probe never determines whether Reddit is available.
-
-## 5. Stop conditions
-
-If the visible browser page contains a network-security block, CAPTCHA/robot check, login wall, HTTP 403/429 message, access denial, or an unloadable comment tree, preflight returns `stop_reason` and ends immediately. A normal browser page is not rejected merely because an unrelated HTTP layer reports 403.
-
-Preflight states are `cdp_not_listening`, `waiting_for_manual_login`, `ready`, and `access_denied`. Connection refusal maps only to `cdp_not_listening`. Visible login or an unprepared page maps to `waiting_for_manual_login`; visible security and access errors map to `access_denied`.
-
-## 6. CDP collection after a ready preflight
-
-Only after user confirmation, use the same CDP endpoint with `collect`, ASIN inputs and low-frequency limits:
-
-```powershell
-node scripts\reddit_playwright_collector.cjs collect `
-  --asin ASIN `
-  --target-comments 10 `
-  --max-posts 3 `
-  --max-comments-per-post 10 `
-  --max-requests-per-thread 40 `
-  --thread-deadline-seconds 150 `
-  --session-mode cdp `
-  --cdp-url http://127.0.0.1:9222
-```
-
-Each collector-created post page is an explicit target. Its in-page JSON requests are restricted to that post Listing, its observed continuation cursors, its own `morechildren`, and already-observed comment IDs. Redirects, cross-post IDs and arbitrary API paths are rejected before the request.
-
-Every post writes `outputs/reddit-comments/evidence/POST_ID/` with `raw/*.json`, `requests.json`, `comments.jsonl`, `ids.json`, `tombstones.json`, `frontier.json`, `summary.json`, and independently recomputed `audit.json`. Only `PASS` comments count toward `target-comments`; `PARTIAL` is preserved but excluded, while `BLOCKED` stops the batch.
-
-## 7. Iterative conversation discovery
-
-Round 1 derives seeds from Amazon and available SellerSprite evidence. It produces all seven families: `product_entity`, `category_solution`, `problem_symptom`, `usage_context`, `decision_intent`, `competitor`, and `natural_language_question`.
-
-After each round, extract candidate language only from qualified observed posts/comments. A new query must contain `generation_source`, `source_terms`, `evidence_comment_ids`, `discovery_round`, and a product/problem/context/competitor link. Reject generic phrases and queries already covered. Communities are marked observed only after actual search or thread evidence supplies the subreddit.
-
-For every candidate post calculate product, solution, problem/context, community, generic-topic penalty, and ambiguity penalty components. Then score every comment independently. A relevant post never makes an unrelated comment qualified.
-
-Stop when trusted comments reach target, the round limit is reached, two rounds have fewer than the configured new trusted comments, two rounds exceed the duplicate threshold, conversation coverage saturates, visible access is blocked, or the user stops.
-
-## 8. Versioned checkpoint and Excel
-
-Checkpoint versions are `collector_version`, `query_plan_version`, `conversation_map_version`, and `audit_version`. Migration preserves trusted PASS rows and completed PASS threads. Old PARTIAL threads populate `partial_reaudit_frontier`; `--retry-partial --force-reaudit-partial` processes that frontier regardless of old completed-query markers. A new discovery round is never suppressed by legacy `searched_keywords`.
-
-Build the workbook with the bundled Python runtime:
-
-```powershell
-python scripts\build_voc_workbook.py --trusted RUN_trusted_comments.jsonl `
-  --partial RUN_partial_candidates.jsonl --conversation-map RUN_conversation_map.json `
-  --query-plan RUN_query_plan.json --community-map RUN_community_map.json `
-  --manifest RUN_manifest.json --output RUN_reddit_voc.xlsx
-```
-
-The six sheets are `Trusted_Comments`, `Partial_Candidates`, `Conversation_Map`, `Query_Performance`, `Community_Map`, and `Run_Summary`. Only trusted rows count toward the target.
+Use `npm test`, `npm run check`, Python unittest discovery, all CLI `--help`, `python -X utf8 scripts/quick_validate.py .` and `doctor.ps1 -Offline`. Export integration tests use only synthetic records and isolated temporary folders. Do not run live doctor/preflight/collect for a request restricted to offline verification. Historical B0HHNB798Q files must remain byte-for-byte unchanged: 438 PASS + 362 validated PARTIAL = 800, with 312 reused and 50 fresh, not 800 Trusted/new.

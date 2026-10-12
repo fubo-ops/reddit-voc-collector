@@ -11,13 +11,15 @@ Usage:
   node scripts/reddit_playwright_collector.cjs collect --asin ASIN [options]
 Inputs:
   --asin ASIN | --asins ASIN1,ASIN2 | --asin-file FILE
-  --target-comments NUMBER (valid unique comments, default 100)
+  --target-comments NUMBER (valid unique comments, new run default 500; resume retains quota)
   --discovery-mode iterative --max-discovery-rounds 5
   --min-new-comments-per-round 10 --duplicate-rate-stop 0.85
-  --max-posts-per-query 10 --max-comments-per-post 500
+  --max-posts-per-query 5 --max-comments-per-post 500
   --retry-partial --force-reaudit-partial
     Re-audit checkpoint PARTIAL threads before keyword discovery; completed keywords do not suppress this queue.
 Access:
+  --session-mode opencli --opencli-session SESSION
+  Existing normal Chrome via the installed OpenCLI extension. No CDP probe or Profile launcher.
   --session-mode selected-chrome-tab
   Codex-only: requires an explicitly @mentioned Chrome tab and the Computer Use extension bridge.
   --session-mode cdp --cdp-url http://127.0.0.1:9222
@@ -32,13 +34,16 @@ Access:
 Output:
   --out-dir ${DEFAULT_OUT} --run-name NAME
   Per-thread evidence: ${DEFAULT_OUT}/evidence/POST_ID/
-Commands: preflight, collect. Public visible content only; login is manual.`)}
-function args(argv){const o={command:"collect",sessionMode:"cdp",cdpUrl:"http://127.0.0.1:9222",discoveryMode:"iterative",maxDiscoveryRounds:"5",minNewCommentsPerRound:"10",duplicateRateStop:"0.85",maxPostsPerQuery:"10",maxCommentsPerPost:"500"},booleanFlags=new Set(["--retry-partial","--force-reaudit-partial"]); let i=0;if(["collect","preflight"].includes(argv[0]))o.command=argv[i++];for(;i<argv.length;i++){const k=argv[i];if(k==="--help"||k==="-h"){o.help=true;continue}if(!k.startsWith("--"))throw Error(`Unknown argument: ${k}`);const name=k.slice(2).replace(/-([a-z])/g,(_,c)=>c.toUpperCase());if(booleanFlags.has(k)){o[name]=true;continue}const v=argv[++i];if(v===undefined||v.startsWith("--"))throw Error(`Missing value for ${k}`);o[name]=v}return o}
+Commands: doctor, preflight, collect, export, validate.
+OpenCLI default: --quality-mode strict|relevance --metadata-json FILE
+  --delivery-dir DIRECTORY --no-export (defer offline export)
+  Relevance relaxes only comment_count_not_reconciled; all other gates remain required. Public visible content only; login is manual.`)}
+function args(argv){const o={command:"collect",sessionMode:"opencli",qualityMode:"strict",qualityModeExplicit:false,targetComments:"500",targetCommentsExplicit:false,concurrency:"1",asinWorkers:"1",maxRetries:"0",requestDelayMin:"8",requestDelayMax:"15",cdpUrl:"http://127.0.0.1:9222",discoveryMode:"iterative",maxDiscoveryRounds:"5",minNewCommentsPerRound:"10",duplicateRateStop:"0.85",maxPostsPerQuery:"5",maxCommentsPerPost:"500"},booleanFlags=new Set(["--retry-partial","--force-reaudit-partial","--no-export"]); let i=0;if(["collect","preflight","doctor","validate","export"].includes(argv[0]))o.command=argv[i++];for(;i<argv.length;i++){const k=argv[i];if(k==="--help"||k==="-h"){o.help=true;continue}if(!k.startsWith("--"))throw Error(`Unknown argument: ${k}`);if(k==="--quality-mode")o.qualityModeExplicit=true;if(k==="--target-comments")o.targetCommentsExplicit=true;const name=k.slice(2).replace(/-([a-z])/g,(_,c)=>c.toUpperCase());if(booleanFlags.has(k)){o[name]=true;continue}const v=argv[++i];if(v===undefined||v.startsWith("--"))throw Error(`Missing value for ${k}`);o[name]=v}return o}
 const DISCOVERY_VERSIONS={collector_version:"2.0.0",query_plan_version:"2.0",conversation_map_version:"1.0",audit_version:"2.0"};
 function migrateDiscoveryCheckpoint(checkpoint={}){const cp={...checkpoint,...DISCOVERY_VERSIONS};cp.discovery_round=Number(cp.discovery_round||1);cp.round_history=cp.round_history||[];cp.query_metrics=cp.query_metrics||{};cp.community_map=cp.community_map||[];cp.conversation_coverage=cp.conversation_coverage||{};cp.trusted_comments=cp.trusted_comments||cp.comments||[];cp.partial_reaudit_frontier=Object.entries(cp.selected_visible_threads||{}).filter(([,v])=>(v?.audit_status||v?.status)==="PARTIAL").map(([id])=>id);return cp}
 function discoveryStop(rounds=[],trustedTotal=0,o={}){const target=Number(o.targetComments||100),max=Number(o.maxDiscoveryRounds||5),min=Number(o.minNewCommentsPerRound||10),dup=Number(o.duplicateRateStop||.85);if(trustedTotal>=target)return{stop:true,stop_reason:"target_comments_reached"};if(rounds.length>=max)return{stop:true,stop_reason:"max_discovery_rounds_reached"};if(rounds.length>=2&&rounds.slice(-2).every(r=>Number(r.new_trusted||0)<min))return{stop:true,stop_reason:"semantic_saturation_low_yield"};if(rounds.length>=2&&rounds.slice(-2).every(r=>Number(r.duplicate_rate||0)>dup))return{stop:true,stop_reason:"duplicate_rate_saturation"};return{stop:false,stop_reason:null}}
 function partialReauditQueue(checkpoint={},o={}){if(!o.retryPartial&&!o.forceReauditPartial)return[];const selected=checkpoint.selected_visible_threads||{};return Object.entries(selected).filter(([,v])=>(v?.audit_status||v?.status)==="PARTIAL").map(([post_id,v])=>({post_id,post_url:v.post_url||v.url||null,previous_status:"PARTIAL",force:!!o.forceReauditPartial}));}
-function transportPlan(o){return o.sessionMode==="selected-chrome-tab"?{mode:"selected-chrome-tab",bridge:"codex-computer-use-extension",requires_cdp:false,auto_start_cdp:false,independent_cli:false}:{mode:"cdp",bridge:"playwright-connect-over-cdp",requires_cdp:true,auto_start_cdp:true,independent_cli:true}}
+function transportPlan(o){if(o.sessionMode==="opencli")return require('./reddit_opencli_collector.cjs').transportPlan();return o.sessionMode==="selected-chrome-tab"?{mode:"selected-chrome-tab",bridge:"codex-computer-use-extension",requires_cdp:false,auto_start_cdp:false,independent_cli:false}:{mode:"cdp",bridge:"playwright-connect-over-cdp",requires_cdp:true,auto_start_cdp:true,independent_cli:true}}
 function selectedTabCapability(c={}){const base=!!(c.evaluate&&c.dom&&c.navigation&&c.owned_temp_tabs);return{capture_mode:base?(c.same_origin_fetch?"structured_same_origin":"visible_dom"):"unavailable",json_frontier_available:!!(base&&c.same_origin_fetch),visible_dom_available:base}}
 function selectedTabExpansionOptions(o={}){return{max_expand_actions:Number(o.maxExpandActions||100),max_comments_per_post:Number(o.maxCommentsPerPost||500),expand_delay_min:Number(o.expandDelayMin||1),expand_delay_max:Number(o.expandDelayMax||3),thread_timeout:Number(o.threadTimeout||600)}}
 async function runSelectedTabCommentExpansion(adapter,o={}){return visibleCapture.expandVisibleThread(adapter,{...selectedTabExpansionOptions(o),post_id:o.postId,checkpoint:o.checkpoint})}
@@ -245,6 +250,11 @@ async function main() {
   try {
     const o=args(process.argv.slice(2));
     if(o.help){help();return}
+    if(o.sessionMode==="opencli"){
+      if(o.command==="collect")asins(o);
+      process.exitCode=await require('./reddit_opencli_collector.cjs').main(o);
+      return;
+    }
     if(o.sessionMode==="selected-chrome-tab"){
       console.log(JSON.stringify({command:o.command,status:"codex_bridge_required",stop_reason:"Use $reddit-voc-collector in a Codex task with an explicitly @mentioned Chrome tab.",session_mode:"selected-chrome-tab",bridge:"codex-computer-use-extension",requires_cdp:false,auto_start_cdp:false},null,2));
       process.exit(2);
@@ -263,5 +273,6 @@ async function main() {
     console.error(JSON.stringify({status:"unavailable",stop_reason:e.message})); exitCode=1;
   }
   process.exit(exitCode);
-}if(require.main===module) main();
-module.exports={args,asins,classify,clean,valid,merge,probeCdp,runCdpStarter,ensureCdp,visibleState,preflight,connectExistingChrome,transportPlan,selectedTabCapability,selectedTabPreflight,selectedTabExpansionOptions,runSelectedTabCommentExpansion,partialReauditQueue,migrateDiscoveryCheckpoint,discoveryStop,DISCOVERY_VERSIONS};
+}
+module.exports={help,args,asins,classify,clean,valid,merge,probeCdp,runCdpStarter,ensureCdp,visibleState,preflight,connectExistingChrome,transportPlan,selectedTabCapability,selectedTabPreflight,selectedTabExpansionOptions,runSelectedTabCommentExpansion,partialReauditQueue,migrateDiscoveryCheckpoint,discoveryStop,DISCOVERY_VERSIONS};
+if(require.main===module) main();

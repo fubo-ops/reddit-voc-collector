@@ -33,4 +33,4 @@ jobs:
       - run: python scripts/quick_validate.py .
       - if: runner.os == 'Windows'
         shell: powershell
-        run: ./doctor.ps1
+        run: ./doctor.ps1 -Offline

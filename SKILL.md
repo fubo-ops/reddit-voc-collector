@@ -1,69 +1,50 @@
 ---
 name: reddit-voc-collector
-description: Use when discovering, collecting, or auditing public Reddit VOC conversations for Amazon ASINs through an explicitly selected Chrome tab in Codex or CDP in an independent CLI, including iterative conversation maps, semantic relevance tiers, comment-tree traversal, evidence audits, checkpoint resume, and comments-only output.
+description: Collect and audit public Reddit VOC comments for Amazon ASINs through OpenCLI and a collector-owned normal Chrome tab, with product-derived queries, per-comment relevance gates, recursive reply expansion, checkpoint resume, tiered counts, Excel validation and centralized delivery.
 ---
 
-# Reddit VOC Collector
+# Reddit VOC Collector — 2.1.0
 
-Collect public, visible Reddit comments related to Amazon ASINs by iteratively learning real community language. Amazon and SellerSprite seed round 1 only; later rounds must be traceable to observed Reddit posts/comments. Posts are discovery and provenance only.
+## Current default
 
-## Inputs
+OpenCLI → doctor → product metadata → browser-page preflight → ready → serial discovery and recursive replies → independent comment gates → global deduplication → checkpoint → Excel → validate (actual exit 0) → verified delivery copy.
 
-Use exactly one or combine the supported sources; duplicates are removed:
+Control only collector-owned normal-Chrome tabs through the installed OpenCLI extension. Do not list/read user tabs, read authentication storage or browser profiles, start a dedicated Profile/CDP, probe 9222, type credentials, solve challenges, switch proxies, request pairing codes or require per-post extension clicks. Compatibility transports are opt-in, not fallback attempts.
 
-```powershell
-node scripts/reddit_playwright_collector.cjs collect --asin B012345678 --target-comments 10
-node scripts/reddit_playwright_collector.cjs collect --asins B012345678,B087654321 --target-comments 50
-node scripts/reddit_playwright_collector.cjs collect --asin-file .\asins.csv --target-comments 100
-```
+Read [references/collection-guide.md](references/collection-guide.md) before running. For the comment, checkpoint and tier contracts, read [references/raw-record-schema.md](references/raw-record-schema.md).
 
-`--target-comments` counts valid globally unique comments, never posts.
+## Inputs and defaults
 
-## Required workflow
+Use `node scripts/reddit_playwright_collector.cjs` with `doctor`, `preflight`, `collect`, `export` or `validate`. ASIN inputs: `--asin ASIN`, `--asins ASIN1,ASIN2` or `--asin-file FILE` (TXT/CSV). `--target-comments NUMBER` is a global unique valid-comment target, not posts or summed per-ASIN workbook rows.
 
-1. Run offline validation before browser access: Python tests, `node --check`, CLI `--help`, and Skill quick validation.
-2. In a Codex task with extension 1.0.0-rc1, default to `collector-owned-tab`: start the loopback bridge, append its short-lived RUN_ID as a URL fragment, and create exactly one Chrome tab through Computer Use. Do not enumerate or inspect user tabs.
-3. Navigate only that recorded tab handle. The extension ignores unmarked tabs, waits on marked search pages, and automatically expands/captures marked post pages. Close only the collector-owned handle and stop the bridge PID at the end.
-4. Resolve product metadata and build `conversation_map.json` with product entities, user problems, usage contexts, decision conversations, and observed community language. Do not label ecommerce terms as community language.
-5. Run iterative discovery with seven query families. Round 1 uses product seeds; later queries require `generation_source`, evidence comment IDs, a specific semantic link, and no existing-query coverage. Build communities only from observed results.
-6. Score every post and comment independently. Label qualified comments `direct_product`, `competitive_context`, or `unmet_need`; never describe indirect tiers as direct reviews. Expand the thread frontier and checkpoint every action.
-7. Send valid PASS-thread rows to `Trusted_Comments`, stable PARTIAL-thread rows to `Partial_Candidates`, and no BLOCKED rows to deliverables. Only trusted rows count toward `target-comments`.
-8. Stop on target, round limit, two low-yield rounds, two high-duplicate rounds, semantic saturation, visible access restriction, or manual stop.
+Defaults: OpenCLI, strict, new-run target-comments=500, concurrency=1, asin-workers=1, max-retries=0; 8–15 seconds between navigations, 1–3 seconds between expansion actions, max-posts-per-query=5, max-expand-actions=100, max-comments-per-post=500, thread-timeout=600 seconds, max-discovery-rounds=5. Resume retains the previous target unless explicitly changed. Stop without refresh/retry on nonready preflight, identity change, comment-load failure or visible CAPTCHA/login/403/429/security block/access denial.
 
-## Iterative controls
+Amazon public product DOM and recognized, ASIN-bound SellerSprite keyword DOM seed round 1. Record Amazon access/login, SellerSprite site and extension status separately. `--metadata-json FILE` may supply an already-observed product record; missing metadata is a stop, never a dog-bowl fallback. SellerSprite absence permits explicit Amazon-only degradation. Generated rules are product-specific lexical rules, not an assertion of human/LLM semantic certainty.
 
-```powershell
-node scripts/reddit_playwright_collector.cjs collect --asin B003ULL1NQ `
-  --discovery-mode iterative --max-discovery-rounds 5 `
-  --min-new-comments-per-round 10 --duplicate-rate-stop 0.85 `
-  --max-posts-per-query 10 --max-comments-per-post 500 `
-  --target-comments 300 --retry-partial --force-reaudit-partial `
-  --session-mode selected-chrome-tab
-```
+Later queries must use actual qualified comment language with evidence IDs, source terms and a product link. A relevant post never makes all its replies relevant. Preserve `direct_product`, `competitive_context` and `unmet_need` labels; indirect VOC is not an ASIN purchase review.
 
-## Access limits
+## Quality and resume
 
-`collector-owned-tab` is Codex-task only. Computer Use creates a temporary normal-Chrome tab and retains its handle; the extension activates only when the URL carries the bridge RUN_ID fragment. Never list or inspect unrelated tabs, launch another Chrome profile, probe CDP, copy a browser profile, export cookies, or close the user's Chrome. The collector closes only its temporary handle.
+- **strict (default):** independently qualified PASS-thread comments alone count.
+- **relevance (explicit user approval):** only `comment_count_not_reconciled` is relaxed. Qualified rows from otherwise complete PARTIAL trees are separately stored and counted; their audit status remains PARTIAL.
+- Identity, visible body, independent product relevance, full ancestry/depth, cycles/orphans, unfinished controls, load failure and access restrictions are never relaxed. Blank/deleted/removed/bot bodies are excluded; visible bodies from `[deleted]` authors remain.
+- Deduplicate by comment ID and canonical comment URL across both tiers and all ASINs; merge associations. Preserve old PASS rows, use the same `--out-dir`, and never truncate them to lower a target. Explicit PARTIAL re-audit (`--retry-partial --force-reaudit-partial`) is independent of completed keywords. Later pending rounds override an earlier empty/saturated round. Retain bodies/nodes in the expansion frontier so resume does not lose already expanded comments.
+- On re-audit, newly PASS partials upgrade without double counting; now-unsafe partials remain candidates and do not count. Resume retains the checkpoint's prior quality mode unless `--quality-mode` is explicit.
 
-`cdp` is retained only for an independently invoked Node CLI. Its local readiness probe may read `http://127.0.0.1:9222/json/version`; none of that behavior applies to `selected-chrome-tab`. In both modes, never type credentials, solve CAPTCHA, bypass login/private/age walls, change proxies, or evade platform controls. Stop on visible access restrictions without refresh or retry. Read [references/collection-guide.md](references/collection-guide.md) before browser access.
+## Excel and delivery
 
-## Selected-tab expansion limits
+The maintained artifact-tool builder is `scripts/build_opencli_workbook.mjs`, orchestrated by `scripts/finalize_opencli_run.cjs`. No temporary builder is required. The Codex bundled Node/artifact-tool runtime is required for Excel; documented environment overrides support an external installation. The legacy Python workbook builder is compatibility-only.
 
-Defaults are `--max-expand-actions 100`, `--max-comments-per-post 500`, `--expand-delay-min 1`, `--expand-delay-max 3`, and `--thread-timeout 600`. The checkpoint stores `expanded_control_keys`, `collected_comment_ids`, `incomplete_frontier`, the action ledger, and owned temporary-tab IDs. Resume skips completed control keys. Only collector-owned tabs used for `continue this thread` may be closed.
+Strict has six sheets. Relevance has eight: `Comments`, `Trusted_Comments`, `Validated_Partial_Comments`, `Partial_Candidates`, `Conversation_Map`, `Query_Performance`, `Community_Map`, `Run_Summary`. Only `Comments` combines counted tiers; candidates never count. Filters, frozen header, wrapped body, text IDs, control-character cleanup and formula-injection protection are mandatory.
 
-Use `--retry-partial --force-reaudit-partial` to build the re-audit queue directly from checkpoint `PARTIAL` threads before any new keyword discovery. This queue is independent of `searched_keywords`; forced re-audit resets the per-run expansion frontier while preserving existing `PASS` rows and prior evidence.
+Internal records/checkpoints/evidence stay in the run directory (default `outputs/reddit-comments`). Validate the exported workbook and evidence with a real exit code 0 before reporting success or copying the deliverable. Incomplete runs retain an internal Excel and FAIL diagnostics, not a false success.
 
-## Outputs
+Local delivery directory: `D:\Project\2026\SKILL\reddit评论采集` (override with `--delivery-dir`). Naming: `ASIN_reddit评论_COUNT条_YYYYMMDDTHHMMSSZ.xlsx`, UTC. Multi-ASIN runs generate one named workbook per ASIN, while the internal global target remains deduplicated. Never replace a historical file. Verify SHA256 and record `delivery_excel_path`, hash and per-ASIN deliveries in manifest.
 
-Default directory: `outputs/reddit-comments` under the current working directory.
+## Regression fact
 
-- `*_trusted_comments.jsonl`, `*_partial_candidates.jsonl`, and Excel with six separate audit sheets.
-- `*_conversation_map.json` and `*_query_plan.json`: five semantic layers, seven query families, provenance, round metrics, and marginal yield.
-- `*_community_map.json`, `*_manifest.json`, and `*_checkpoint.json`: observed communities, versioned resume state, access/quality counts, saturation, and stop reason.
-- `evidence/POST_ID/`: hashed raw projections, request ledger, comment IDs/tree, frontier, collector summary and independent `audit.json`.
+The B0HHNB798Q run had **438 PASS + 362 validated PARTIAL = 800**, including **312 reused-evidence comments + 50 fresh-search comments**. It was neither 800 Trusted nor 800 newly collected. Historical outputs are not migration fixtures to overwrite.
 
-Read [references/collection-guide.md](references/collection-guide.md) for commands and [references/raw-record-schema.md](references/raw-record-schema.md) for the exact comment contract.
+## Compatibility only
 
-## Collector-owned-tab extension bridge
-
-Version 1.0.0-rc1 in `extension/` has no popup or pairing-code workflow. The bridge generates a memory-only RUN_ID; the collector places it in the fragment of its own Chrome tab. Unmarked tabs exit before DOM access. Read [references/extension-bridge-design.md](references/extension-bridge-design.md) for permissions, fixed extension ID, signing protocol, threat model and audit rules.
+`--session-mode cdp` requires independently enabled CDP; `selected-chrome-tab` needs the Codex bridge and explicit selection; the RC1 `collector-owned-tab` extension/local bridge remains documented in [references/extension-bridge-design.md](references/extension-bridge-design.md). RC1 extension version/ID remain unchanged and separate from collector 2.1.0. None is auto-started when OpenCLI is unavailable.

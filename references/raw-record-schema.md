@@ -1,84 +1,39 @@
-# Reddit comment record schema
+# Reddit comment records — collector 2.1.0
 
-Each JSONL/CSV row represents exactly one public Reddit comment. Post content is excluded; post fields are provenance only.
+Every row is one public comment, never a post body. Post ID/title/URL/subreddit are provenance only. New OpenCLI records use `schema_version: reddit_comment_v3`; prior v1/v2 records remain readable and are not rewritten merely to migrate.
 
-Extension bridge 1.0.0-rc1 writes signed capture batches using `reddit_visible_capture_v3`; the bridge strips the RUN_ID fragment before persisting URLs and later normalizes only PASS-thread comments into this row schema.
+Required fields: schema_version, platform, asin, matched_asins, query, matched_keywords, subreddit, post_id, post_title, post_url, comment_id, parent_id, depth, author, body, score, created_at, comment_url, collected_at, audit_status, semantic_relevance, comment_gate. `quality_tier` distinguishes trusted_PASS from validated_partial_count_mismatch where applicable.
 
-```json
-{
-  "schema_version": "reddit_comment_v2",
-  "platform": "reddit",
-  "asin": "B012345678",
-  "matched_asins": ["B012345678", "B087654321"],
-  "query": "washable dog bed",
-  "matched_keywords": ["washable dog bed", "dog bed problem"],
-  "subreddit": "dogs",
-  "post_id": "abc123",
-  "post_title": "Which bed is easiest to wash?",
-  "post_url": "https://www.reddit.com/r/dogs/comments/abc123/example/",
-  "comment_id": "def456",
-  "parent_id": "abc123",
-  "depth": 0,
-  "author": "example_user",
-  "body": "The removable cover saves me time.",
-  "score": 8,
-  "created_at": "2026-09-01T10:00:00Z",
-  "comment_url": "https://www.reddit.com/r/dogs/comments/abc123/example/def456/",
-  "collected_at": "2026-09-14T18:00:00Z",
-  "relevance_tier": "direct_product",
-  "association_reason": "matched Cosequin",
-  "evidence_terms": ["Cosequin"],
-  "relevance_score": 0.81,
-  "comment_relevance_score": 0.81,
-  "discovery_round": 2,
-  "query_family": "problem_symptom",
-  "source_query": "dog struggling to get up after sleeping",
-  "community_source": "dogs",
-  "comment_record_status": "valid",
-  "thread_audit_status": "PASS",
-  "thread_evidence_path": "C:\\absolute\\outputs\\reddit-comments\\evidence\\abc123"
-}
-```
+`comment_gate` stores version, accepted/status, quality_mode, thread_status, reasons, semantic_relevance, semantic_evidence, matched_asins and checked_at. Its PASS is a **record admission decision**, not a claim that a PARTIAL thread passed completeness. Normalization retains both new fields and legacy relevance/thread fields.
 
-## Rules
+## Body, identity and tree
 
-1. Filter blank, `[deleted]`, `[removed]`, and pure bot-notice bodies. 作者为 `[deleted]` 但正文仍可见时保留。
-2. Deduplicate globally by `comment_id` and normalized `comment_url`.
-3. If one comment matches multiple ASINs, retain one row and merge all values into `matched_asins`.
-4. Keep positive, neutral, and negative content without sentiment filtering.
-5. Count only remaining unique comment rows toward `target_comments`.
-6. `Trusted_Comments` accepts only valid `thread_audit_status: PASS`; stable PARTIAL records go only to `Partial_Candidates`; BLOCKED records are excluded.
-7. `direct_product` requires an explicit product/brand identifier. `competitive_context` covers competitors or equivalent solutions. `unmet_need` covers relevant problems/contexts without claiming a target-product review.
-8. Comment relevance is scored independently from post relevance. `source_query`, family, round, community, and evidence terms preserve discovery provenance.
+Blank/[deleted]/[removed]/bot-notice bodies are excluded; a visible body with deleted author is retained. Deduplicate globally by ID and canonical URL and merge matched ASINs/keywords. URLs must identify the same Reddit post and comment. Depth 0 has the post as parent; every deeper level has the actual parent comment. Validate the whole ancestry for missing nodes, cycles and depth mismatch, including observed tombstone nodes. Preserve positive/neutral/negative comments without sentiment filtering.
 
-## Thread evidence and status
+## Tiers and quality
 
-The independent auditor reads `raw/*.json` and `requests.json`, not the collector summary. It verifies hashes, contained paths, exact post identity, comment field consistency, duplicates, orphans, cycles, continuation progress, unresolved IDs, unledgered raw files and counter reconciliation.
+- direct_product: explicit brand/model plus independent product context in the comment; not proof of purchase.
+- competitive_context: observed/supplied competitor entity tied to this product category.
+- unmet_need: independently evidenced relevant category usage/problem.
 
-- `PASS`: closed frontier, consistent evidence and exact counter model.
-- `PARTIAL`: incomplete frontier, exhausted budget, conflict, missing ID or unreconciled count; stable valid comments are preserved only as `Partial_Candidates`.
-- `BLOCKED`: visible login/security challenge, 403/429, denial or non-JSON challenge; checkpoint is saved and later work stops.
+A relevant title/query alone is insufficient. Product rules are generated from current-ASIN observed metadata, not a dog-bowl list. Missing or ambiguous metadata should yield conservative exclusions or a metadata-required stop.
 
-Counter model: all observed IDs minus only nodes whose `body` and `author` are both `[deleted]`. `[removed]` remains counted, and deleted IDs remain evidence rather than recovered text.
+Strict counts only eligible PASS rows. Explicit relevance counts those plus independently gated PARTIAL rows whose sole failure is comment_count_not_reconciled, with no orphan/frontier/blocked metadata. Never relax identity, body, relevance, graph consistency, unfinished controls, load or access failures. Unsafe PARTIAL and BLOCKED cannot enter counted sheets. Preserve audit_status PARTIAL for admitted partials. Re-audit promotion transfers one row to Trusted without duplicate count; new unsafe audit quarantines prior partials as candidates.
 
-### Transport-specific evidence
+## Checkpoint and evidence
 
-- `cdp` uses `capture_mode: target_bound_json`; audit validates Listing, `after`, `morechildren`, continuation and `api/info` evidence.
-- `selected-chrome-tab` uses `capture_mode: visible_dom`; evidence records DOM snapshots, collector-owned page identity, expansion actions, before/after IDs and remaining visible load controls. It never claims JSON-frontier coverage because the Codex extension evaluation sandbox does not expose same-origin `fetch`.
-- A visible-DOM thread reaches `PASS` only when no load control remains, observed IDs and parents are consistent, and the visible platform counter reconciles. Otherwise it is `PARTIAL` and contributes no final comments.
+Checkpoint stores asins, target_comments, quality_mode, product_profile, queries, posts, trusted_comments, validated_partial_comments, partial_candidates, query_metrics, round_history, run_counts, preflight status, stop detail and owned-tab cleanup. The frontier stores expanded_control_keys, comments, observed_nodes, collected_comment_ids, incomplete_frontier, expansion_actions and stable rounds. Action ledgers include clicked label/key, new IDs, current total and max depth.
 
-### Selected-tab checkpoint
+Per post: evidence/POST_ID/comments.jsonl, audit.json, frontier.json, comment_gates.json; recovery/revalidation adds its own gate ledger. Root audit.json mirrors checkpoint post audits. PASS means the **visible** frontier is closed and platform count reconciles; it does not prove access to hidden/deleted/private data or all Reddit comments. PARTIAL retains explicit failure codes; visible restrictions become BLOCKED and stop the run.
 
-Each post checkpoint records `expanded_control_keys`, `collected_comment_ids`, `incomplete_frontier`, `expansion_actions`, `stable_rounds`, `owned_temp_tabs`, and `stop_reason`. Each action entry contains the clicked label/key, action kind, newly observed ID count, current total, and maximum depth. Reaching `max-expand-actions`, `max-comments-per-post`, or `thread-timeout` preserves the unfinished frontier and marks the thread `PARTIAL`.
+## Manifest, Excel and delivery
 
-## Manifest contract
+Manifest records input ASINs/products/access sources, quality mode, global effective/trusted/validated/candidate counts, PASS/PARTIAL/BLOCKED counts, stop reason/detail, doctor/preflight, checkpoint path, owned-tab cleanup, run_counts, workbooks, validation and delivery hashes. Reused evidence, preserved baseline and fresh discovery are distinct counts.
 
-The manifest also records round count; new queries/communities; trusted/partial yield; duplicate rate and marginal yield by round; saturation reason; conversation coverage; and counts by relevance tier, query family, and community.
+Relevance sheets: Comments (counted union), Trusted_Comments (PASS only), Validated_Partial_Comments (eligible PARTIAL only), Partial_Candidates (uncounted), Conversation_Map, Query_Performance, Community_Map, Run_Summary. Strict omits the combined and validated-partial sheets. Multi-ASIN sheets filter by matched_asins; their row-count sum may exceed the globally deduplicated target.
 
-## Conversation/query/community contracts
+Excel projection preserves IDs, body, identity URL and audit grade with safe text formatting, wrapped bodies, frozen/filter headers and control-character/formula-injection handling. Validator checks these against checkpoint and evidence, including consistency of JSONL, manifest and audit. Only actual validation exit 0 permits success/delivery.
 
-`conversation_map.json` contains `product_entities`, `user_problems`, `usage_contexts`, `decision_conversations`, and `community_language`. Only the last layer may claim Reddit language, and every observed expression carries evidence comment IDs.
+Final names: ASIN_reddit评论_COUNT条_YYYYMMDDTHHMMSSZ.xlsx in D:\Project\2026\SKILL\reddit评论采集 (configurable). No historical file overwrite. Delivery SHA256 must match the internal workbook; record delivery_excel_path/deliveries. Internal checkpoint, JSONL and evidence remain in the original run directory.
 
-Each query stores `query`, `query_family`, `generation_source`, `source_terms`, `evidence_comment_ids`, `discovery_round`, `priority`, `relevance_score`, `communities_searched`, `posts_found`, `qualified_posts`, `valid_comments`, `duplicate_comments`, and `marginal_yield`.
-
-Each community row stores `subreddit`, `community_topic`, `product_relevance`, `problem_relevance`, `estimated_post_yield`, `actual_comment_yield`, `discovered_from`, and `status`. Examples are not treated as discovered facts.
+Regression: B0HHNB798Q = 438 PASS + 362 validated PARTIAL = 800; 312 reused plus 50 fresh. This is a reporting invariant, not permission to modify historical files.

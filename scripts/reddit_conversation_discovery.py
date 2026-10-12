@@ -40,7 +40,7 @@ def build_conversation_map(product, seller=None, evidence_comments=None):
     product_entities = {
         "brand": _clean([product.get("brand")]),
         "product_names": _clean([product.get("product_name"), product.get("title")]),
-        "aliases": _clean(product.get("aliases", [])),
+        "aliases": _clean(product.get("aliases", []) + product.get("common_names", [])),
         "product_types": _clean(product.get("product_types", []) + [product.get("category")]),
         "ingredients": _clean(product.get("ingredients", []) + seller.get("ingredients", [])),
         "functions": _clean(product.get("functions", [])),
@@ -57,7 +57,7 @@ def build_conversation_map(product, seller=None, evidence_comments=None):
     }
     usage_contexts = {
         "user_types": _clean(product.get("user_types", [])), "pet_profiles": _clean(product.get("pet_profiles", [])),
-        "life_stages": _clean(product.get("life_stages", [])), "daily_scenarios": _clean(product.get("contexts", [])),
+        "life_stages": _clean(product.get("life_stages", [])), "daily_scenarios": _clean(product.get("contexts", []) + product.get("use_scenarios", [])),
         "health_conditions": _clean(product.get("health_conditions", [])), "perioperative": _clean(product.get("perioperative", [])),
         "combinations": _clean(product.get("combinations", [])),
     }
@@ -65,7 +65,7 @@ def build_conversation_map(product, seller=None, evidence_comments=None):
         "recommendation": ["recommend", "what helped"], "comparison": ["versus", "vs", "switch"],
         "effectiveness": ["does it work", "actually worked"], "value": ["worth it", "worth buying"],
         "time_to_effect": ["how long to work"], "safety": ["safe", "side effects"], "dosage": ["dose", "dosage"],
-        "alternatives": ["alternative", "replacement"], "vet_advice": ["vet recommend", "veterinarian"],
+        "alternatives": ["alternative", "replacement"], "expert_advice": ["expert recommend", "professional advice"],
         "retention": ["repurchase", "stopped using"],
     }
     observed = _clean([c.get("body") for c in evidence_comments if c.get("body")])
@@ -119,8 +119,8 @@ def generate_next_round_queries(cmap, comments, round_number, existing_queries=N
     patterns = [
         (r"\b(struggl(?:e|ed|ing) to [a-z ]{2,35})", "problem_symptom"),
         (r"\b([A-Z][A-Za-z]+ (?:helped|worked|upset)[^.?!]{0,35})", "competitor"),
-        (r"\b(what does your vet recommend[^?]{0,45})", "natural_language_question"),
-        (r"\b(senior dog[^.?!]{0,45})", "usage_context"),
+        (r"\b(what (?:does|do) [^?]{0,30}recommend[^?]{0,45})", "natural_language_question"),
+        (r"\b((?:use|using|during) [^.?!]{2,45})", "usage_context"),
     ]
     for comment in comments:
         body = str(comment.get("body") or "")

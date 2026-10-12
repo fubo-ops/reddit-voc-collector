@@ -1,76 +1,50 @@
-# Reddit VOC Collector
+# Reddit VOC Collector 2.1.0
 
-一套可独立运行、也可作为 Codex Skill 使用的公开 Reddit VOC 评论采集器。输入 Amazon ASIN 后生成语义查询计划，发现相关 Reddit 帖子、展开公开评论树、审计完整性，并输出 comments-only JSONL、CSV 和 Excel。
+Current default: **OpenCLI + collector-owned normal Chrome** → doctor → product metadata → browser DOM preflight → recursive comment tree → per-comment product gates → global dedup/checkpoint → Excel → validate exit 0 → ASIN-named delivery. No CDP/Profile launch, per-post extension clicks, pairing codes, user-tab inventory or authentication-data reads.
 
-## 支持环境
+## Environment
 
-- Windows 10/11
-- Python 3.10–3.13
-- Node.js 20+
-- Google Chrome
-
-GitHub Actions 在 Python 最低、最高支持版本上运行 Python、Node、PowerShell及扩展清单检查。
-
-## 安装
-
-```powershell
-git clone https://github.com/fubo-ops/reddit-voc-collector.git
-cd reddit-voc-collector
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-npm ci
-```
-
-安装为 Codex Skill：
+Node.js 20+; Python 3.10–3.13 (Codex bundled Python 3.12 recommended); manually logged-in Chrome with the separately installed OpenCLI extension/CLI. Codex's bundled `@oai/artifact-tool` runtime authors Excel. `OPENCLI_ENTRY`, `ARTIFACT_NODE_MODULES`, `ARTIFACT_NODE` and `REDDIT_PYTHON` support external runtime locations. Playwright and the RC1 Reddit bridge/extension are compatibility-only, not primary prerequisites.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
-powershell -ExecutionPolicy Bypass -File .\doctor.ps1
+powershell -ExecutionPolicy Bypass -File .\doctor.ps1 -Offline
+node scripts/reddit_playwright_collector.cjs doctor
 ```
+Installation copies Skill code without removing outputs or starting Chrome. The offline doctor is environment-only, not a claim of a connected browser.
 
-安装器会显示扩展目录。在 `chrome://extensions/` 启用开发者模式并“加载已解压的扩展程序”。固定扩展 ID：`edpfinibjpbkdnognnhealnfepkeopem`。
-
-## 运行
-
-在 Codex 中调用 `$reddit-voc-collector`。`collector-owned-tab` 模式由 Codex 创建并只控制一个临时 Reddit 标签页；扩展识别短期 RUN_ID 后自动采集，无需逐帖点击、配对码或 CDP。
-
-独立 CLI 使用专用 Chrome CDP 配置：
+## Use
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\start_reddit_cdp.ps1
-node scripts\reddit_playwright_collector.cjs preflight --session-mode cdp --cdp-url http://127.0.0.1:9222
-node scripts\reddit_playwright_collector.cjs collect --asin B003ULL1NQ --target-comments 100 --session-mode cdp --cdp-url http://127.0.0.1:9222
+node scripts/reddit_playwright_collector.cjs preflight --asin ASIN --out-dir RUN_DIR
+node scripts/reddit_playwright_collector.cjs collect --asin ASIN --target-comments 500 --out-dir RUN_DIR
+node scripts/reddit_playwright_collector.cjs collect --asins ASIN1,ASIN2 --target-comments 500 --out-dir RUN_DIR
+node scripts/reddit_playwright_collector.cjs collect --asin-file ASIN_FILE --target-comments 500 --out-dir RUN_DIR
 ```
+Amazon visible product information supplies seeds; recognized SellerSprite keywords are optional with explicit missing-status records. `--metadata-json FILE` supports cached, source-preserving product records. Query expansion uses actual community language/evidence IDs. Controls are serial with 8–15-second navigation delays; nonready, load failure and visible access restrictions stop without refresh/retry.
 
-完整参数：
+Strict counts only qualified PASS. Explicit `--quality-mode relevance` relaxes count reconciliation alone and counts independently validated PARTIAL separately. Preserve the original directory on resume; `--retry-partial --force-reaudit-partial` is independent of completed keywords. Target is globally unique comments across both eligible tiers and all ASINs.
+
+## Excel / validation / delivery
 
 ```powershell
-node scripts\reddit_playwright_collector.cjs --help
+node scripts/reddit_playwright_collector.cjs export --out-dir RUN_DIR
+node scripts/reddit_playwright_collector.cjs validate --out-dir RUN_DIR
 ```
+The maintained builder is `scripts/build_opencli_workbook.mjs`, not a temporary script. Relevance has eight tier/audit sheets; strict has six. Finalization uses actual validator process exit 0, then exclusive copy/SHA256.
 
-默认输出到当前工作目录的 `outputs/reddit-comments`。输出包含评论 JSONL/CSV/Excel、query plan、manifest、checkpoint 和逐帖 evidence；不生成独立帖子记录。
+Default delivery: `D:\Project\2026\SKILL\reddit评论采集`; override `--delivery-dir`. Files: `ASIN_reddit评论_COUNT条_YYYYMMDDTHHMMSSZ.xlsx` (UTC), never overwrite historical files. Multi-ASIN runs deliver one file per ASIN; summed workbook associations are not the global unique count. Checkpoint/JSONL/audit evidence remain in RUN_DIR.
 
-## 数据与安全边界
+B0HHNB798Q regression: **438 PASS + 362 validated PARTIAL = 800**, of which 312 were reused evidence and 50 fresh-search comments. Do not call this 800 Trusted/new or verified purchases.
 
-- 只处理公开可见 Reddit 内容。
-- 不读取、导出或提交 Cookie、密码、Token、浏览器 Profile 或历史记录。
-- 不自动登录、不处理验证码、不绕过登录墙、私有社区、年龄限制或平台风控。
-- CAPTCHA、403、429、network security block 或访问拒绝时停止。
-- 扩展权限为空，仅允许 `https://www.reddit.com/*` 与本机 bridge。
-- `outputs`、浏览器资料、断点结果、Excel、日志、缓存及环境文件均由 `.gitignore` 排除。
-
-详细流程见 `SKILL.md` 与 `references/collection-guide.md`；字段见 `references/raw-record-schema.md`。
-
-## 测试
+## Offline checks
 
 ```powershell
-python -m unittest discover -s tests -v
+python -X utf8 -m unittest discover -s tests
 npm test
 npm run check
-python scripts/quick_validate.py .
+python -X utf8 scripts/quick_validate.py .
 ```
+Browser tests use injected fixtures and forbid real browser transport. Artifact-tool integration uses isolated synthetic runs. CI does not assume logged-in Chrome; export integration is explicitly skipped if the external bundled SDK is missing. No original VOC project or previous collector runtime dependency.
 
-## 许可证
-
-MIT，见 `LICENSE`。
+See [collection guide](references/collection-guide.md) and [record schema](references/raw-record-schema.md) for defaults, quality invariants, commands and current visible-DOM/lexical limits. Legacy RC1 bridge version/ID stay unchanged and are documented only in [compatibility design](references/extension-bridge-design.md).

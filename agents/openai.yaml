@@ -1,4 +1,4 @@
 interface:
   display_name: "Reddit VOC Collector"
-  short_description: "通过用户选定Chrome标签页采集Reddit VOC"
-  default_prompt: "Use $reddit-voc-collector with my explicitly @mentioned Chrome Reddit tab in selected-chrome-tab mode. Preflight visible DOM first, never inspect other tabs or CDP, and merge only independently audited PASS comments."
+  short_description: "OpenCLI普通Chrome、逐条相关性与评论断点采集"
+  default_prompt: "Use $reddit-voc-collector with OpenCLI in a collector-owned normal Chrome tab. Run doctor and browser DOM preflight, collect only after ready, use product-derived rules and strict by default, preserve checkpoints, validate Excel with exit 0, then deliver ASIN-named workbooks. Never inspect other tabs or authentication data."
