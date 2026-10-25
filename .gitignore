@@ -27,3 +27,9 @@ profiles/
 SingletonCookie
 SingletonLock
 SingletonSocket
+
+# Additional local runs and platform caches
+.runtime/
+runs/
+.DS_Store
+Thumbs.db
