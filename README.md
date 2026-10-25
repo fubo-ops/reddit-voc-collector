@@ -11,7 +11,7 @@
 
 `reddit-voc-collector` 是由 Amazon ASIN 驱动的 Reddit 公开评论采集工具和 Agent Skill，当前版本 `2.1.0`。默认通过 OpenCLI 操作采集器创建的普通 Chrome 标签页，用商品信息生成查询，逐条判断评论相关性，保留回复关系与断点，最终生成经独立校验的 Excel。
 
-仓库只覆盖采集编排、规则判断、导出与校验：OpenCLI CLI / Chrome 扩展、已登录的 Chrome 和 artifact-tool 运行时都是外部前置条件；Playwright / CDP、选定标签页和 RC1 扩展桥属于显式选择的兼容路径。Agent 运行约定见根目录 `SKILL.md`。
+仓库只覆盖采集编排、规则判断、导出与校验：OpenCLI CLI / Chrome 扩展、已登录的 Chrome 和 artifact-tool（外部工作簿导出工具）运行时都是外部前置条件；Playwright / CDP（Chrome 调试协议）、选定标签页和 RC1 扩展桥（旧版兼容扩展）属于显式选择的兼容路径。Agent 运行约定见根目录 `SKILL.md`。
 
 ## 核心功能
 
@@ -172,13 +172,13 @@ reddit-voc-collector/
 
 ### Phase 2: 质量与续采
 
-- ✅ 三类相关性规则判定（direct / competitive / unmet）
-- ✅ checkpoint 续采与 PARTIAL 证据重审
+- ✅ 三类相关性规则判定（direct 直连本品 / competitive 竞品语境 / unmet 未满足需求）
+- ✅ checkpoint（断点）续采与 PARTIAL（部分）证据重审
 - ✅ 跨帖子、跨 ASIN 去重
 
 ### Phase 3: 导出与校验
 
-- ✅ 分层 Excel（strict 6 表 / relevance 8 表）
+- ✅ 分层 Excel（严格模式 6 张表 / 放宽模式 8 张表）
 - ✅ Python 独立校验与计数一致性检查
 - ✅ 交付命名、SHA-256 核对与历史交付保护
 
